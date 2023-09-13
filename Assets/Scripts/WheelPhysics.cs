@@ -17,7 +17,8 @@ public class WheelPhysics : MonoBehaviour
     Rigidbody rb;
     struct WheelHit
     {
-        public Vector3 hitPoint;
+        public Vector3 point;
+        public Vector3 normal;
         public Collider collider;
     }
     List<WheelHit> hits;
@@ -27,7 +28,7 @@ public class WheelPhysics : MonoBehaviour
     {
         get
         {
-            return -transform.right;
+            return -transform.up;
         }
     }
 
@@ -35,7 +36,7 @@ public class WheelPhysics : MonoBehaviour
     {
         get
         {
-            return transform.right;
+            return transform.up;
         }
     }
 
@@ -75,45 +76,40 @@ public class WheelPhysics : MonoBehaviour
         {
             Vector3 contactPoint = col.ClosestPointOnBounds(COM);
 
-            if (IsInCylinder(in wheelMath, in contactPoint, out Vector3 pointOnWheelWorld))
+            if (IsInCylinder(in wheelMath, in contactPoint, out Vector3 pointOnWheelWorld, out CylinderCoords cc, out CylinderCoords clampedCC))
             {
-                print("Collision");
+                print(cc.h_origin);
+
+                if (clampedCC.r < radius)
+                {
+                    // disc
+
+                }
+                else
+                {
+                    // curve
+                }
 
                 hits.Add(new WheelHit
                 {
-                    hitPoint = pointOnWheelWorld,
+                    point = pointOnWheelWorld,
                     collider = col,
                 });
-            }
-            /*if (leftCirclePlane.GetSide(contactPoint) || rightCirclePlane.GetSide(contactPoint))
-                continue;
-
-            Vector3 vecFromCOMToContactPoint = contactPoint - COM;
-            float disFromCOMToContactPoint = vecFromCOMToContactPoint.magnitude;
-            Vector3 dirFromCOMToContactPoint = vecFromCOMToContactPoint / disFromCOMToContactPoint;
-
-            Vector3 closestPointOnWheel = FindPointOnWheel(contactPoint, leftCirclePlane, rightCirclePlane, dirFromCOMToContactPoint);
-
-            WheelHit wheelHit = new WheelHit { collider = col, closestPointOnOther = contactPoint, closestPointOnWheel= closestPointOnWheel };
-            hits.Add(wheelHit);
-
-            ApplyPhysics(wheelHit);*/
-            
+            }            
         }
     }
 
-    bool IsInCylinder(in WheelMath wheelMath, in Vector3 point, out Vector3 pointOnWheelWorld)
+    bool IsInCylinder(in WheelMath wheelMath, in Vector3 point, out Vector3 pointOnWheelWorld, out CylinderCoords cc, out CylinderCoords clampedCC)
     {        
-        float3 camPosLocal = wheelMath.CartesianLocalPoint(point);
+        float3 camPosLocal = wheelMath.CartesianWorldToLocal(point);
+        cc = wheelMath.CartesianToCylindricalPosY(camPosLocal);
 
-        CylinderCoords cc = wheelMath.CartesianToCylindricalPosY(camPosLocal);
-
-        CylinderCoords clampedCC = wheelMath.ClampCylindricalPosY(cc, radius, width);
+        clampedCC = wheelMath.ClampCylindricalPosY(cc, radius, width);
         float3 newCamPosLocal = wheelMath.CylindricalPosYToCartesian(clampedCC);
 
         pointOnWheelWorld = wheelMath.CartesianLocalToWorld(newCamPosLocal);
 
-        return cc.r <= radius && math.abs(cc.h_origin) <= width / 2f;
+        return cc.r <= radius * 2 && math.abs(cc.h_origin) <= width / 2f;
     }
 
     struct WheelMath
@@ -129,7 +125,7 @@ public class WheelPhysics : MonoBehaviour
             wheelTRS = float4x4.TRS(wheelWorldCenter, wheelWorldRot, new float3(1, 1, 1));
         }
 
-        public float3 CartesianLocalPoint(float3 worldPoint)
+        public float3 CartesianWorldToLocal(float3 worldPoint)
         {
             return math.mul(math.inverse(wheelTRS), new float4(worldPoint, 1)).xyz; // transform.InverseTransformPoint(hit.point);
         }
@@ -141,7 +137,7 @@ public class WheelPhysics : MonoBehaviour
 
         public CylinderCoords ClampCylindricalPosY(CylinderCoords cc, float cylinderR, float cylinderW)
         {
-            float clampR = math.clamp(cc.r, 0, cylinderR * 2);
+            float clampR = math.clamp(cc.r, 0, cylinderR);  
             float clampHO = math.clamp(cc.h_origin, -cylinderW / 2, +cylinderW / 2);
             return new CylinderCoords { r=clampR, theta=cc.theta, h_origin=clampHO };
         }
@@ -169,9 +165,13 @@ public class WheelPhysics : MonoBehaviour
             foreach (WheelHit hit in hits)
             {
                 Gizmos.color = Color.red;
-                Gizmos.DrawSphere(hit.hitPoint, 0.02f); 
+                Gizmos.DrawSphere(hit.point, 0.02f); 
             }
         }
+
+        /*Gizmos.color = Handles.color;
+        Gizmos.DrawWireSphere(LeftCircleCenter + LeftCircleNormal * radius, radius);
+        Gizmos.DrawWireSphere(RightCircleCenter + RightCircleNormal * radius, radius);*/
     }
 #endif
 
