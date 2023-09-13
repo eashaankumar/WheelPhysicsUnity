@@ -17,7 +17,8 @@ public class WheelPhysics : MonoBehaviour
     Rigidbody rb;
     struct WheelHit
     {
-        public Vector3 point;
+        public Vector3 pointInside;
+        public Vector3 pointOnSurface;
         public Vector3 normal;
         public Collider collider;
     }
@@ -76,33 +77,35 @@ public class WheelPhysics : MonoBehaviour
         {
             Vector3 contactPoint = col.ClosestPointOnBounds(COM);
 
-            if (IsInCylinder(in wheelMath, in contactPoint, out Vector3 pointOnWheelWorld, out CylinderCoords cc, out CylinderCoords clampedCC))
+            if (IsInCylinder(in wheelMath, in contactPoint, out Vector3 pointOnWheelWorld, out CylinderCoords clampedCC))
             {
-                print(cc.h_origin);
+                CylinderCoords curveCC = wheelMath.ClampCylinderToCylinderCurve(clampedCC, radius);
+                CylinderCoords diskCC = wheelMath.ClampCylinderToCylinderDisk(clampedCC, radius);
 
-                if (clampedCC.r < radius)
-                {
-                    // disc
-
-                }
-                else
-                {
-                    // curve
-                }
+                float3 pointOnWheelCurveWorld = wheelMath.CartesianLocalToWorld(wheelMath.CylindricalPosYToCartesian(curveCC));
+                float3 pointOnWheelDiskWorld = wheelMath.CartesianLocalToWorld(wheelMath.CylindricalPosYToCartesian(diskCC));
 
                 hits.Add(new WheelHit
                 {
-                    point = pointOnWheelWorld,
+                    pointInside = pointOnWheelWorld,
+                    pointOnSurface = pointOnWheelCurveWorld,
+                    collider = col,
+                });
+
+                hits.Add(new WheelHit
+                {
+                    pointInside = pointOnWheelWorld,
+                    pointOnSurface = pointOnWheelDiskWorld,
                     collider = col,
                 });
             }            
         }
     }
 
-    bool IsInCylinder(in WheelMath wheelMath, in Vector3 point, out Vector3 pointOnWheelWorld, out CylinderCoords cc, out CylinderCoords clampedCC)
+    bool IsInCylinder(in WheelMath wheelMath, in Vector3 point, out Vector3 pointOnWheelWorld, out CylinderCoords clampedCC)
     {        
         float3 camPosLocal = wheelMath.CartesianWorldToLocal(point);
-        cc = wheelMath.CartesianToCylindricalPosY(camPosLocal);
+        CylinderCoords cc = wheelMath.CartesianToCylindricalPosY(camPosLocal);
 
         clampedCC = wheelMath.ClampCylindricalPosY(cc, radius, width);
         float3 newCamPosLocal = wheelMath.CylindricalPosYToCartesian(clampedCC);
@@ -151,6 +154,19 @@ public class WheelPhysics : MonoBehaviour
         {
             return math.mul(wheelTRS, new float4(localPoint, 1)).xyz;
         }
+
+        public CylinderCoords ClampCylinderToCylinderCurve(CylinderCoords toClamp, float clampingR)
+        {
+            return new CylinderCoords { h_origin = toClamp.h_origin, r = clampingR, theta = toClamp.theta };
+        }
+
+        public CylinderCoords ClampCylinderToCylinderDisk(CylinderCoords toClamp, float clampingW)
+        {
+            int sign = 1;
+            if (toClamp.h_origin < 0)
+                sign = -1;
+            return new CylinderCoords { h_origin = sign * clampingW / 2f, r = toClamp.r, theta = toClamp.theta };
+        }
     }
 
 #if UNITY_EDITOR
@@ -165,7 +181,8 @@ public class WheelPhysics : MonoBehaviour
             foreach (WheelHit hit in hits)
             {
                 Gizmos.color = Color.red;
-                Gizmos.DrawSphere(hit.point, 0.02f); 
+                Gizmos.DrawSphere(hit.pointOnSurface, 0.02f);
+                Gizmos.DrawLine(hit.pointInside, hit.pointOnSurface);
             }
         }
 
