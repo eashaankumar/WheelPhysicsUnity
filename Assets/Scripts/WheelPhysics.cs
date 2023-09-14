@@ -13,6 +13,14 @@ public class WheelPhysics : MonoBehaviour
     float radius;
     [SerializeField]
     LayerMask layerMask;
+    [SerializeField]
+    float k;
+    [SerializeField]
+    float damper;
+    [SerializeField]
+    float _tireGripFactor;
+    [SerializeField]
+    float dynamicFriction;
 
     Rigidbody rb;
     struct WheelHit
@@ -67,6 +75,11 @@ public class WheelPhysics : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
         hits = new List<WheelHit>();
+
+        rb.automaticInertiaTensor = false;
+        float inertiaFlat = 1f / 12f * width * width + 1f / 4f * radius * radius;
+        float inertiaVertical = 0.5f * radius * radius;
+        rb.inertiaTensor = new Vector3(inertiaFlat, inertiaVertical, inertiaFlat) * rb.mass;
     }
 
     private void FixedUpdate()
@@ -100,6 +113,40 @@ public class WheelPhysics : MonoBehaviour
                 });
             }            
         }
+
+        foreach(WheelHit hit in hits)
+        {
+            Vector3 wheelVel = rb.GetPointVelocity(hit.pointOnSurface);
+            SuspensionForce(hit, wheelVel);
+            SteeringForce(hit, wheelVel);
+            Friction(hit, wheelVel);
+        }
+    }
+
+    void Friction(WheelHit hit, Vector3 tireWorldVel)
+    {
+        Vector3 dir = -(hit.pointOnSurface - hit.pointInside).normalized;
+        float vel = Vector3.Dot(dir, -tireWorldVel);
+
+        rb.AddForceAtPosition(-tireWorldVel * dynamicFriction, hit.pointOnSurface, ForceMode.Acceleration);
+    }
+
+    void SuspensionForce(WheelHit hit, Vector3 tireWorldVel)
+    {
+        Vector3 springDir = -(hit.pointOnSurface - hit.pointInside).normalized;
+        float offset = (hit.pointOnSurface - hit.pointInside).magnitude;
+        float vel = Vector3.Dot(springDir, tireWorldVel);
+        float force = (offset * k) - (vel * damper);
+        rb.AddForceAtPosition(springDir * force, hit.pointOnSurface, ForceMode.Acceleration);
+    }
+
+    void SteeringForce(WheelHit hit, Vector3 tireWorldVel)
+    {
+        Vector3 steeringDir = transform.up;
+        float steeringVel = Vector3.Dot(steeringDir, tireWorldVel);
+        float desiredVelChange = -steeringVel * _tireGripFactor;
+        //float desiredAccel = desiredVelChange / Time.fixedDeltaTime;
+        rb.AddForceAtPosition(desiredVelChange * steeringDir, hit.pointOnSurface, ForceMode.VelocityChange);
     }
 
     bool IsInCylinder(in WheelMath wheelMath, in Vector3 point, out Vector3 pointOnWheelWorld, out CylinderCoords clampedCC)
@@ -115,59 +162,7 @@ public class WheelPhysics : MonoBehaviour
         return cc.r <= radius * 2 && math.abs(cc.h_origin) <= width / 2f;
     }
 
-    struct WheelMath
-    {
-        float3 wheelWorldCenter;
-        quaternion wheelWorldRot;
-        float4x4 wheelTRS;
-
-        public WheelMath(float3 _wheelWorldCenter, quaternion _wheelWorldRot)
-        {
-            wheelWorldCenter = _wheelWorldCenter;
-            wheelWorldRot = _wheelWorldRot;
-            wheelTRS = float4x4.TRS(wheelWorldCenter, wheelWorldRot, new float3(1, 1, 1));
-        }
-
-        public float3 CartesianWorldToLocal(float3 worldPoint)
-        {
-            return math.mul(math.inverse(wheelTRS), new float4(worldPoint, 1)).xyz; // transform.InverseTransformPoint(hit.point);
-        }
-
-        public CylinderCoords CartesianToCylindricalPosY(float3 cartesian)
-        {
-            return CylinderCoords.FromCartesian(cartesian.x, cartesian.z, cartesian.y);
-        }
-
-        public CylinderCoords ClampCylindricalPosY(CylinderCoords cc, float cylinderR, float cylinderW)
-        {
-            float clampR = math.clamp(cc.r, 0, cylinderR);  
-            float clampHO = math.clamp(cc.h_origin, -cylinderW / 2, +cylinderW / 2);
-            return new CylinderCoords { r=clampR, theta=cc.theta, h_origin=clampHO };
-        }
-
-        public float3 CylindricalPosYToCartesian(CylinderCoords cc)
-        {
-            return CylinderCoords.ToCartesian(cc.r, cc.theta, cc.h_origin).xzy;
-        }
-
-        public float3 CartesianLocalToWorld(float3 localPoint)
-        {
-            return math.mul(wheelTRS, new float4(localPoint, 1)).xyz;
-        }
-
-        public CylinderCoords ClampCylinderToCylinderCurve(CylinderCoords toClamp, float clampingR)
-        {
-            return new CylinderCoords { h_origin = toClamp.h_origin, r = clampingR, theta = toClamp.theta };
-        }
-
-        public CylinderCoords ClampCylinderToCylinderDisk(CylinderCoords toClamp, float clampingW)
-        {
-            int sign = 1;
-            if (toClamp.h_origin < 0)
-                sign = -1;
-            return new CylinderCoords { h_origin = sign * clampingW / 2f, r = toClamp.r, theta = toClamp.theta };
-        }
-    }
+    
 
 #if UNITY_EDITOR
     private void OnDrawGizmos()
@@ -212,5 +207,59 @@ public struct CylinderCoords
             theta = math.atan2(discB, discA),
             h_origin = h_origin,
         };
+    }
+}
+
+struct WheelMath
+{
+    float3 wheelWorldCenter;
+    quaternion wheelWorldRot;
+    float4x4 wheelTRS;
+
+    public WheelMath(float3 _wheelWorldCenter, quaternion _wheelWorldRot)
+    {
+        wheelWorldCenter = _wheelWorldCenter;
+        wheelWorldRot = _wheelWorldRot;
+        wheelTRS = float4x4.TRS(wheelWorldCenter, wheelWorldRot, new float3(1, 1, 1));
+    }
+
+    public float3 CartesianWorldToLocal(float3 worldPoint)
+    {
+        return math.mul(math.inverse(wheelTRS), new float4(worldPoint, 1)).xyz; // transform.InverseTransformPoint(hit.point);
+    }
+
+    public CylinderCoords CartesianToCylindricalPosY(float3 cartesian)
+    {
+        return CylinderCoords.FromCartesian(cartesian.x, cartesian.z, cartesian.y);
+    }
+
+    public CylinderCoords ClampCylindricalPosY(CylinderCoords cc, float cylinderR, float cylinderW)
+    {
+        float clampR = math.clamp(cc.r, 0, cylinderR);
+        float clampHO = math.clamp(cc.h_origin, -cylinderW / 2, +cylinderW / 2);
+        return new CylinderCoords { r = clampR, theta = cc.theta, h_origin = clampHO };
+    }
+
+    public float3 CylindricalPosYToCartesian(CylinderCoords cc)
+    {
+        return CylinderCoords.ToCartesian(cc.r, cc.theta, cc.h_origin).xzy;
+    }
+
+    public float3 CartesianLocalToWorld(float3 localPoint)
+    {
+        return math.mul(wheelTRS, new float4(localPoint, 1)).xyz;
+    }
+
+    public CylinderCoords ClampCylinderToCylinderCurve(CylinderCoords toClamp, float clampingR)
+    {
+        return new CylinderCoords { h_origin = toClamp.h_origin, r = clampingR, theta = toClamp.theta };
+    }
+
+    public CylinderCoords ClampCylinderToCylinderDisk(CylinderCoords toClamp, float clampingW)
+    {
+        int sign = 1;
+        if (toClamp.h_origin < 0)
+            sign = -1;
+        return new CylinderCoords { h_origin = sign * clampingW / 2f, r = toClamp.r, theta = toClamp.theta };
     }
 }
